@@ -1,0 +1,10 @@
+torch
+matplotlib
+opencv-contrib-python
+imutils
+scikit-learn
+tqdm
+pandas
+pyarrow
+pyyaml
+tensorboard
