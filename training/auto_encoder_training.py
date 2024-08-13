@@ -1,18 +1,24 @@
 import os
 from datetime import datetime
 
+from PIL import Image
 import torch
+from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.transforms import transforms
 
 from datasets.datasets import AutoEncoderImageDataset
 from torch.utils.data import DataLoader
 
+BATCH_REPORT_INTERVAL = 10
 
-def train_auto_encoder(model, optimizer, loss_fn, train_loader, val_loader, epochs=10, epoch_sample=True):
+
+def train_auto_encoder(model, optimizer, loss_fn, train_loader, val_loader, prefix, epochs=10, epoch_sample=True):
     def train_one_epoch(epoch_index, tb_writer):
         running_loss = 0.
         last_loss = 0.
+        last_images = None
+        last_index = len(train_loader) - 1
 
         # Here, we use enumerate(training_loader) instead of
         # iter(training_loader) so that we can track the batch
@@ -27,6 +33,9 @@ def train_auto_encoder(model, optimizer, loss_fn, train_loader, val_loader, epoc
             # Make predictions for this batch
             output_train_images = model(input_images)
 
+            if train_index == last_index:
+                last_images = (input_images, output_train_images)
+
             # Compute the loss and its gradients
             loss = loss_fn(input_images, output_train_images)
             loss.backward()
@@ -36,17 +45,16 @@ def train_auto_encoder(model, optimizer, loss_fn, train_loader, val_loader, epoc
 
             # Gather data and report
             running_loss += loss.item()
-            if train_index % 1000 == 999:
-                last_loss = running_loss / 1000  # loss per batch
-                print('  batch {} loss: {}'.format(train_index + 1, last_loss))
+            if train_index != 0 and train_index % BATCH_REPORT_INTERVAL == 0:
+                last_loss = running_loss / BATCH_REPORT_INTERVAL  # loss per batch
                 tb_x = epoch_index * len(train_loader) + train_index + 1
                 tb_writer.add_scalar('Loss/train', last_loss, tb_x)
                 running_loss = 0.
 
-        return last_loss
+        return last_loss, last_images
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    writer = SummaryWriter('runs/fashion_trainer_{}'.format(timestamp))
+    writer = SummaryWriter('runs/{}_auto_encoder_{}'.format(prefix, timestamp))
     epoch_number = 0
 
     best_vloss = 1_000_000.
@@ -56,7 +64,31 @@ def train_auto_encoder(model, optimizer, loss_fn, train_loader, val_loader, epoc
 
         # Make sure gradient tracking is on, and do a pass over the data
         model.train(True)
-        avg_loss = train_one_epoch(epoch_number, writer)
+        avg_loss, last_images = train_one_epoch(epoch_number, writer)
+
+        if epoch_sample:
+            sample_folder = './output/samples/{}'.format(prefix)
+            os.makedirs(sample_folder, exist_ok=True)
+
+            input_images = last_images[0]
+            output_images = last_images[1]
+
+            # Save the last batch of images
+            input_image = input_images[0]
+            output_image = output_images[0]
+
+            input_image = transforms.ToPILImage()(input_image)
+            output_image = transforms.ToPILImage()(output_image)
+
+            # Horizontal stack the images
+            stacked_image = Image.new('RGB', (input_image.width + output_image.width, input_image.height))
+            stacked_image.paste(input_image, (0, 0))
+            stacked_image.paste(output_image, (input_image.width, 0))
+
+            stacked_image.save(sample_folder + '/sample_{}.png'.format(timestamp))
+
+            writer.add_images('Sample Images', output_images, epoch_number + 1)
+            writer.flush()
 
         running_vloss = 0.0
         # Set the model to evaluation mode, disabling dropout and using population
@@ -84,24 +116,15 @@ def train_auto_encoder(model, optimizer, loss_fn, train_loader, val_loader, epoc
         # Track the best performance, and save the model's state
         if avg_vloss < best_vloss:
             best_vloss = avg_vloss
-            model_folder = './output/models'
-            os.makedirs(model_folder)
-            model_path = './output/models/model_{}_{}'.format(timestamp, epoch_number)
+            model_folder = './output/models/{}'.format(prefix)
+            os.makedirs(model_folder, exist_ok=True)
+            model_path = './output/models/{}/model_{}_{}'.format(prefix, timestamp, epoch_number)
             torch.save(model.state_dict(), model_path)
-
-        if epoch_sample:
-            sample_folder = './output/samples'
-            os.makedirs(sample_folder)
-            sample_path = './output/samples/sample_{}_{}'.format(timestamp, epoch_number)
-            sample_images = model.sample(8)
-            sample_images = sample_images.detach().cpu()
-            writer.add_images('Sample Images', sample_images, epoch_number + 1)
-            writer.flush()
 
         epoch_number += 1
 
 
-def train_auto_encoder_pokemon(model, optimizer, loss_function, resize=(32, 32), epochs=10):
+def train_auto_encoder_pokemon(model, optimizer, loss_function, prefix, resize=(32, 32), epochs=10):
     preprocessing = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize(resize),  # Resize the image
@@ -118,4 +141,4 @@ def train_auto_encoder_pokemon(model, optimizer, loss_function, resize=(32, 32),
     train_data_loader = DataLoader(training_data, batch_size=32, shuffle=True)
     test_data_loader = DataLoader(test_data, batch_size=32, shuffle=True)
 
-    return train_auto_encoder(model, optimizer, loss_function, train_data_loader, test_data_loader, epochs=epochs)
+    return train_auto_encoder(model, optimizer, loss_function, train_data_loader, test_data_loader, prefix, epochs=epochs)

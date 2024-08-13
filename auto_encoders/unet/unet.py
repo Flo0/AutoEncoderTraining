@@ -1,5 +1,6 @@
 import torch.nn.functional as NNFunc
-from unet_parts import *
+from torch import nn
+from auto_encoders.unet.unet_parts import UEncoder, UDecoder
 
 
 class UNet(nn.Module):

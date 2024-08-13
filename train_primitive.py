@@ -1,8 +1,10 @@
 import torch
 from focal_frequency_loss import FocalFrequencyLoss as FFL
 
-from auto_encoder_training import train_auto_encoder_pokemon
+import auto_encoders.unet.unet
+from training.auto_encoder_training import train_auto_encoder_pokemon
 from auto_encoders.custom.primitive import PrimitiveAutoEncoder
+from auto_encoders.unet.unet import UNet
 
 LEARN_RATE = 0.001
 FFL_LOSS_WEIGHT = 1.0
@@ -17,4 +19,4 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
 ffl_loss = FFL(loss_weight=FFL_LOSS_WEIGHT, alpha=1.0)
 
 # Train the model
-train_auto_encoder_pokemon(model=model, optimizer=optimizer, loss_function=ffl_loss, epochs=2)
+train_auto_encoder_pokemon(model=model, optimizer=optimizer, prefix="PrimitiveAE", resize=(64, 64), loss_function=ffl_loss, epochs=50)
