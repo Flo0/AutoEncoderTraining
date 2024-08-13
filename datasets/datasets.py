@@ -1,6 +1,7 @@
 import os
 from torch.utils.data import Dataset
-from torchvision.io import read_image
+from torchvision import transforms
+from torchvision.io import read_image, ImageReadMode
 
 
 class AutoEncoderImageDataset(Dataset):
@@ -12,7 +13,7 @@ class AutoEncoderImageDataset(Dataset):
         for root, dirs, files in os.walk(self.image_dir):
             for file in files:
                 if load_into_memory:
-                    image = read_image(os.path.join(root, file))
+                    image = read_image(os.path.join(root, file), mode=ImageReadMode.RGB)
                     if transform is not None:
                         image = transform(image)
                     self.images.append(image)
