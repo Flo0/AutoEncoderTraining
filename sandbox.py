@@ -1,35 +1,77 @@
-from datetime import datetime
-
+import numpy as np
 import torch
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import transforms
-from datasets.sampling import matplotlib_imshow_grid
+from matplotlib import pyplot as plt
+from torchvision import transforms
 
-from auto_encoders.custom.primitive import PrimitiveAutoEncoder
-from datasets.datasets import AutoEncoderImageDataset
+from auto_encoders.unet.unet import BaseUNet
+from datasets.datasets import AutoEncoderNPZDataset, DenoiserNPZDataset
+from util import image_utils
+from training import loss_functions
 
-resize = (64, 64)
+data_str = "./data/external/image_net/valid"
 
 preprocessing = transforms.Compose([
-    transforms.ToPILImage(),
-    transforms.Resize(resize),  # Resize the image
-    transforms.ToTensor()  # Convert to a tensor with shape (C, H, W) and range [0, 1]
-    # transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize to range [-1, 1]
+    transforms.ToTensor(),
+    transforms.ToPILImage()
 ])
 
-training_data = AutoEncoderImageDataset(image_dir="./data/pokemon/gen3-processed-rgb", load_into_memory=True, train=True, transform=preprocessing)
+dataset = DenoiserNPZDataset(data_str, noise_transform=lambda x: x)
 
-print('Training set has {} instances'.format(len(training_data)))
+original_image = dataset[3][0]
 
-train_data_loader = DataLoader(training_data, batch_size=32, shuffle=True)
+noised_images = {}
 
-model = PrimitiveAutoEncoder(in_out_channels=(3, 3), scaling=0.5)
+for deviation in [5, 10, 15, 20, 25]:
+    gaussian_image = image_utils.add_gaussian_noise(original_image, 0, deviation)
+    gaussian_image = preprocessing(gaussian_image)
+    noised_images[deviation] = gaussian_image
 
-images = next(iter(train_data_loader))
+model = BaseUNet()
+state_dict = torch.load("./output/denoise_models/Denoising_Unet_MSE/model_20240827_070155_2")
+model.load_state_dict(state_dict)
 
-print(images.shape)
+model.to("cuda:1")
 
-output_images = model(images)
+denoised_images = {}
 
-print(output_images.shape)
+for deviation, noised_image in noised_images.items():
+    noised_image = transforms.ToTensor()(noised_image).to("cuda:1")
+    noised_image = noised_image.unsqueeze(0)
+    denoised_image = model(noised_image)
+    denoised_images[deviation] = denoised_image
+
+# Plot the original image and the noised images
+fig, axes = plt.subplots(2, 6, figsize=(12, 4))
+
+axes[0][0].imshow(preprocessing(original_image))
+axes[0][0].set_title("Original")
+axes[0][0].axis('off')
+
+axes[1][0].imshow(preprocessing(original_image))
+axes[1][0].set_title("Denoised")
+axes[1][0].axis('off')
+
+loss_func = loss_functions.MSELoss()
+
+losses = {}
+
+for i, (deviation, noised_image) in enumerate(noised_images.items()):
+    noised_image = transforms.ToTensor()(noised_image).to("cuda:1")
+    noised_image = noised_image.unsqueeze(0)
+    denoised_image = denoised_images[deviation]
+    loss = loss_func(denoised_image, noised_image).item()
+    losses[deviation] = loss
+
+for i, (deviation, noised_image) in enumerate(noised_images.items()):
+    noise_variance = 1.0 / 255.0 * deviation
+    axes[0][i + 1].imshow(noised_image)
+    axes[0][i + 1].set_title("Noise Variance: {:1.2f}".format(noise_variance))
+    axes[0][i + 1].axis('off')
+
+for i, (deviation, denoised_image) in enumerate(denoised_images.items()):
+    axes[1][i + 1].imshow(transforms.ToPILImage()(denoised_image.cpu().squeeze(0)))
+    axes[1][i + 1].set_title("MSE Loss: {:1.4f}".format(losses[deviation]))
+    axes[1][i + 1].axis('off')
+
+plt.tight_layout()
+plt.savefig('noised_images.png')

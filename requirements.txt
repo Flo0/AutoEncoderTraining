@@ -13,3 +13,8 @@ pillow
 numpy<2.0
 focal-frequency-loss
 tensorboard
+prettytable
+pytorch_ssim
+torcheval
+pytorch_msssim
+scikit-image

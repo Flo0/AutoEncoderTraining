@@ -1,22 +1,35 @@
-import torch
-from focal_frequency_loss import FocalFrequencyLoss as FFL
-
-import auto_encoders.unet.unet
-from training.auto_encoder_training import train_auto_encoder_pokemon
-from auto_encoders.custom.primitive import PrimitiveAutoEncoder
-from auto_encoders.unet.unet import UNet
+from training.auto_encoder_training import *
+from auto_encoders.custom.cifar_style import ConvAutoEncoder
+from training.loss_functions import *
 
 LEARN_RATE = 0.001
 FFL_LOSS_WEIGHT = 1.0
 
-# Model is Primitive AutoEncoder
-model = PrimitiveAutoEncoder(in_out_channels=(3, 3), scaling=0.5, keep_dim=True)
+loss_functions = {
+    "FFL": FFLLoss(),
+    "MSE": MSELoss(),
+    "L1": L1Loss(),
+    "SSIM_9": SSIMLoss(window_size=9)
+}
 
-# Optimizer is Adam
-optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
+from util.model_utils import count_parameters
 
-# Loss function is Focal Frequency Loss
-ffl_loss = FFL(loss_weight=FFL_LOSS_WEIGHT, alpha=1.0)
+count_parameters(ConvAutoEncoder(keep_dim=True, scale=2.0))
 
-# Train the model
-train_auto_encoder_pokemon(model=model, optimizer=optimizer, prefix="PrimitiveAE", resize=(64, 64), loss_function=ffl_loss, epochs=50)
+for scale in [1.0, 2.0]:
+    for key, loss in loss_functions.items():
+        # Model is Primitive AutoEncoder
+        model = ConvAutoEncoder(keep_dim=True, scale=scale)
+
+        # Optimizer is Adam
+        optimizer = torch.optim.Adam(model.parameters(), lr=LEARN_RATE)
+
+        train_auto_encoder_image_net(
+            model=model,
+            optimizer=optimizer,
+            prefix="BASIC_" + str(scale) + key,
+            resize=(32, 32),
+            loss_function=loss,
+            epochs=16,
+            batch_size=5120
+        )

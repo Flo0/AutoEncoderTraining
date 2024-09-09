@@ -1,68 +1,60 @@
 import torch
 import torch.nn as nn
-import torchvision
+import torch.nn.functional as F
 
 
-class UBlock(nn.Module):
-    def __init__(self, input_channel_count, output_channel_count):
+class DoubleConv(nn.Module):
+    def __init__(self, in_channels, out_channels, mid_channels=None):
         super().__init__()
-        self.conv_in = nn.Conv2d(input_channel_count, output_channel_count, 3)
-        self.relu = nn.ReLU()
-        self.conv_out = nn.Conv2d(output_channel_count, output_channel_count, 3)
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
 
     def forward(self, x):
-        x = self.conv_in(x)
-        x = self.relu(x)
-        x = self.conv_out(x)
-        return x
+        return self.double_conv(x)
 
 
-class UEncoder(nn.Module):
-    def __init__(self, channels=(3, 64, 128, 256, 512, 1024)):
+class Down(nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        encoder_parts = []
-        for channel_index in range(len(channels) - 1):
-            block = UBlock(channels[channel_index], channels[channel_index + 1])
-            encoder_parts.append(block)
-
-        self.encoder_parts = nn.ModuleList(encoder_parts)
-        self.pool = nn.MaxPool2d(2)
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool2d(2),
+            DoubleConv(in_channels, out_channels)
+        )
 
     def forward(self, x):
-        features = []
-        for block in self.encoder_parts:
-            x = block(x)
-            features.append(x)
-            x = self.pool(x)
-        return features
+        return self.maxpool_conv(x)
 
 
-class UDecoder(nn.Module):
-    def __init__(self, channels=(1024, 512, 256, 128, 64)):
+class Up(nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.channels = channels
-        up_convolutions = []
-        decoder_parts = []
+        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+        self.conv = DoubleConv(in_channels, out_channels)
 
-        for channel_index in range(len(channels) - 1):
-            transposed_conv = nn.ConvTranspose2d(channels[channel_index], channels[channel_index + 1], 2, 2)
-            up_convolutions.append(transposed_conv)
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        # input is CHW
+        diff_y = x2.size()[2] - x1.size()[2]
+        diff_x = x2.size()[3] - x1.size()[3]
 
-            block = UBlock(channels[channel_index], channels[channel_index + 1])
-            decoder_parts.append(block)
+        x1 = F.pad(x1, [diff_x // 2, diff_x - diff_x // 2,
+                        diff_y // 2, diff_y - diff_y // 2])
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
 
-        self.up_convolutions = nn.ModuleList(up_convolutions)
-        self.decoder_parts = nn.ModuleList(decoder_parts)
 
-    def forward(self, x, encoder_features):
-        for i in range(len(self.channels) - 1):
-            x = self.up_convolutions[i](x)
-            cropped_features = self.crop(encoder_features[i], x)
-            x = torch.cat([x, cropped_features], dim=1)
-            x = self.decoder_parts[i](x)
-        return x
+class OutConv(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(OutConv, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
 
-    def crop(self, encoder_features, x):
-        _, _, height, width = x.shape
-        encoder_features = torchvision.transforms.CenterCrop([height, width])(encoder_features)
-        return encoder_features
+    def forward(self, x):
+        return self.conv(x)
