@@ -1,36 +1,51 @@
-from torch import nn
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
-class ConvAutoEncoder(nn.Module):
-    def __init__(self, keep_dim=True, scale=1.0):
-        super(ConvAutoEncoder, self).__init__()
-        self.keep_dim = keep_dim
+class FCNNEncoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, latent_dim):
+        """
+        Fully Connected Neural Network Encoder for VAE.
 
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, int(scale * 16), kernel_size=3, stride=2, padding=1),  # [B, 16, 16, 16]
-            nn.ReLU(True),
-            nn.Conv2d(int(scale * 16), int(scale * 32), kernel_size=3, stride=2, padding=1),  # [B, 32, 8, 8]
-            nn.ReLU(True),
-            nn.Conv2d(int(scale * 32), int(scale * 64), kernel_size=7),  # [B, 64, 1, 1]
-            nn.ReLU(True)
-        )
-
-        # Decoder
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(int(scale * 64), int(scale * 32), kernel_size=7),  # [B, 32, 8, 8]
-            nn.ReLU(True),
-            nn.ConvTranspose2d(int(scale * 32), int(scale * 16), kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 16, 16, 16]
-            nn.ReLU(True),
-            nn.ConvTranspose2d(int(scale * 16), 3, kernel_size=3, stride=2, padding=1, output_padding=1),  # [B, 3, 32, 32]
-            nn.Sigmoid()  # To ensure the output is between 0 and 1
-        )
+        Args:
+            input_dim (int): Dimension of the input data.
+            hidden_dim (int): Dimension of the hidden layer.
+            latent_dim (int): Dimension of the latent space (z).
+        """
+        super(FCNNEncoder, self).__init__()
+        # Fully connected layers
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc_mu = nn.Linear(hidden_dim, latent_dim)  # Output mean (mu)
+        self.fc_logvar = nn.Linear(hidden_dim, latent_dim)  # Output log(sigma^2)
 
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
+        # Forward pass through first hidden layer with activation
+        h = F.relu(self.fc1(x))
+        # Output mean and log variance for latent space
+        mu = self.fc_mu(h)
+        log_sigma2 = self.fc_logvar(h)
+        return mu, log_sigma2
 
-        if self.keep_dim:
-            x = nn.functional.interpolate(x, size=x.shape[-2:])
 
-        return x
+class FCNNDecoder(nn.Module):
+    def __init__(self, latent_dim, hidden_dim, output_dim):
+        """
+        Fully Connected Neural Network Decoder for VAE.
+
+        Args:
+            latent_dim (int): Dimension of the latent space (z).
+            hidden_dim (int): Dimension of the hidden layer.
+            output_dim (int): Dimension of the output data (reconstructed input).
+        """
+        super(FCNNDecoder, self).__init__()
+        # Fully connected layers
+        self.fc1 = nn.Linear(latent_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, z):
+        # Forward pass through hidden layer with activation
+        h = F.relu(self.fc1(z))
+        # Output reconstructed data
+        x_reconstructed = torch.sigmoid(self.fc2(h))  # Sigmoid for normalized output
+        return x_reconstructed
