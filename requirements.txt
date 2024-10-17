@@ -18,3 +18,5 @@ pytorch_ssim
 torcheval
 pytorch_msssim
 scikit-image
+einops
+ema-pytorch
